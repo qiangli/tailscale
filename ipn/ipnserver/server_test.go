@@ -14,8 +14,12 @@ import (
 	"tailscale.com/client/local"
 	"tailscale.com/envknob"
 	"tailscale.com/ipn"
+	"tailscale.com/ipn/conffile"
 	"tailscale.com/ipn/lapitest"
+	"tailscale.com/paths"
+	"tailscale.com/tailcfg"
 	"tailscale.com/tsd"
+	"tailscale.com/types/persist"
 	"tailscale.com/util/syspolicy/pkey"
 	"tailscale.com/util/syspolicy/policytest"
 )
@@ -84,6 +88,52 @@ func TestUserConnectDisconnectOnWindows(t *testing.T) {
 	// The current user should not be set after a disconnect, as no one is
 	// currently using the server.
 	server.CheckCurrentUser(nil)
+}
+
+func TestConfigFileProfileOnWindows(t *testing.T) {
+	envknob.SetenvForTest(t, "TS_DEBUG_FAKE_GOOS", "windows")
+
+	for _, tt := range []struct {
+		name       string
+		socketPath string
+		wantKept   bool
+	}{
+		{"dev-pipe", `\\.\pipe\tailscale-test`, true},
+		{"protected-pipe", paths.WindowsProtectedPipePrefix + `Tailscale\tailscaled`, false},
+		{"no-socket-path", "", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			sys := tsd.NewSystem()
+			sys.InitialConfig = &conffile.Config{Parsed: ipn.ConfigVAlpha{Version: "alpha0"}}
+			sys.SocketPath = tt.socketPath
+			server := lapitest.NewServer(t, lapitest.WithSys(sys))
+			lb := server.Backend()
+
+			// Log in before any client connects, as a config file's auth key does.
+			if err := lb.ForTest().SetPersist(&persist.Persist{
+				NodeID:      "node1",
+				UserProfile: tailcfg.UserProfile{ID: 1, LoginName: "user@example.com"},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			want := lb.CurrentProfile().ID()
+			if want == "" {
+				t.Fatal("config profile has no ID before a client connects")
+			}
+
+			// The pin leaves CurrentUserID empty, so CheckCurrentUser doesn't apply.
+			client := server.ClientWithName("User")
+			_, cancelWatcher := client.WatchIPNBus(t.Context(), 0)
+			t.Cleanup(cancelWatcher)
+
+			switch got := lb.CurrentProfile().ID(); {
+			case tt.wantKept && got != want:
+				t.Errorf("profile = %q after a client connected; want it kept as %q", got, want)
+			case !tt.wantKept && got == want:
+				t.Errorf("profile = %q after a client connected; want it switched away", got)
+			}
+		})
+	}
 }
 
 func TestIPNAlreadyInUseOnWindows(t *testing.T) {

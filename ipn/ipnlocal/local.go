@@ -4953,6 +4953,11 @@ func (b *LocalBackend) switchToBestProfileLocked(reason string) {
 //
 // b.mu must be held.
 func (b *LocalBackend) resolveBestProfileLocked() (_ ipn.LoginProfileView, isBackground bool) {
+	// Under a config file, keep the current profile on the owner-only dev pipe.
+	if b.conf != nil && envknob.GOOS() == "windows" && b.sys.SocketPath != "" && !paths.IsWindowsProtectedPipe(b.sys.SocketPath) {
+		return b.pm.CurrentProfile(), false
+	}
+
 	// TODO(nickkhyl): delegate all of this to the extensions and remove the distinction
 	// between "foreground" and "background" profiles as we migrate away from the concept
 	// of a single "current user" on Windows. See tailscale/corp#18342.

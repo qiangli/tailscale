@@ -845,16 +845,14 @@ func TestOneNodeUpInterruptedDeviceApproval(t *testing.T) {
 }
 
 func TestConfigFileAuthKey(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("a config file can't set unattended mode, so Windows drops the node to NoState; see #20751")
-	}
-	t.Parallel()
+	tstest.Parallel(t)
 	const authKey = "opensesame"
 	env := NewTestEnv(t, ConfigureControl(func(control *testcontrol.Server) {
 		control.RequireAuthKey = authKey
 	}))
 
-	n1 := NewTestNode(t, env)
+	// A userspace node, because the Windows service can't be passed --config.
+	n1 := NewTestNode(t, env, TUNMode(false))
 	n1.configFile = filepath.Join(n1.dir, "config.json")
 	authKeyFile := filepath.Join(n1.dir, "my-auth-key")
 	must.Do(os.WriteFile(authKeyFile, fmt.Appendf(nil, "%s\n", authKey), 0666))
